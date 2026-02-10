@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+        content="A showcase of technical works by Shon John, featuring game server hosting infrastructure, advanced Discord automation bots, and modern web design masterpieces.">
+    <title>Projects | Shon</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Specific Projects Page Styles */
+        .page-header {
+            text-align: center;
+            padding: 80px 20px 40px;
+        }
+
+        .page-header h1 {
+            font-size: 3.5rem;
+            margin-bottom: 20px;
+            background: linear-gradient(to bottom, #fff, var(--text-muted));
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .showcase-container {
+            max-width: 1100px;
+            margin: auto;
+            padding: 0 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 120px;
+            margin-top: 60px;
+            margin-bottom: 120px;
+        }
+
+        .project-showcase {
+            display: flex;
+            align-items: center;
+            gap: 50px;
+            position: relative;
+        }
+
+        .project-showcase:nth-child(even) {
+            flex-direction: row-reverse;
+        }
+
+        .project-preview {
+            flex: 1.2;
+            height: 400px;
+            border-radius: 24px;
+            overflow: hidden;
+            position: relative;
+            background: var(--bg-panel);
+            border: 1px solid var(--border-light);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+            transition: var(--transition);
+        }
+
+        .project-preview img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        .project-preview:hover img {
+            transform: scale(1.05);
+        }
+
+        .project-preview::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.6), transparent);
+        }
+
+        .project-info {
+            flex: 1;
+            z-index: 2;
+        }
+
+        .project-number {
+            font-size: 5rem;
+            font-weight: 800;
+            color: rgba(255, 255, 255, 0.03);
+            position: absolute;
+            top: -60px;
+            left: 0;
+            line-height: 1;
+            pointer-events: none;
+        }
+
+        .project-showcase:nth-child(even) .project-number {
+            left: auto;
+            right: 0;
+        }
+
+        .project-tags {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .p-tag {
+            font-size: 0.85rem;
+            color: var(--accent-primary);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+            background: rgba(99, 102, 241, 0.1);
+            padding: 6px 14px;
+            border-radius: 50px;
+        }
+
+        .project-info h2 {
+            font-size: 2.5rem;
+            margin-bottom: 20px;
+            line-height: 1.1;
+        }
+
+        .project-info p {
+            color: var(--text-muted);
+            font-size: 1.05rem;
+            margin-bottom: 30px;
+            line-height: 1.7;
+        }
+
+        .project-actions {
+            display: flex;
+            gap: 20px;
+        }
+
+        /* Glass badge on image */
+        .glass-badge {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(10px);
+            padding: 10px 20px;
+            border-radius: 50px;
+            font-size: 0.9rem;
+            color: #fff;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 2;
+        }
+
+        /* Responsive */
+        @media(max-width: 900px) {
+
+            .project-showcase,
+            .project-showcase:nth-child(even) {
+                flex-direction: column;
+                gap: 30px;
+            }
+
+            .project-preview {
+                width: 100%;
+                height: 300px;
+            }
+
+            .project-number {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav>
+        <div class="logo">DevShon</div>
+        <div class="menu-toggle"><span class="material-symbols-outlined">menu</span></div>
+        <div class="nav-links">
+            <a href="index.html">Home</a>
+            <a href="services.html">Services</a>
+            <a href="projects.html" class="active">Projects</a>
+            <a href="about.html">About</a>
+            <a href="contact.html">Contact</a>
+            <a href="contact.html" class="cta-btn">Let's Talk</a>
+        </div>
+    </nav>
+
+    <div class="page-header">
+        <h1 class="hidden">Selected Works</h1>
+        <p class="hidden" style="color: var(--text-muted);">A showcase of my technical journey and diverse skillset.</p>
+    </div>
+
+    <div class="showcase-container">
+
+        <!-- PROJECT 1: Shonnodes -->
+        <article class="project-showcase hidden">
+            <span class="project-number">01</span>
+
+            <div class="project-preview">
+                <img src="images/shonnodes.png" alt="Shonnodes Interface">
+                <div class="glass-badge">Live System</div>
+            </div>
+
+            <div class="project-info">
+                <div class="project-tags">
+                    <span class="p-tag">Hosting</span>
+                    <span class="p-tag">Infrastructure</span>
+                </div>
+                <h2>Shonnodes</h2>
+                <p>
+                    A high-performance game server hosting solution designed for speed and reliability.
+                    I engineered the complete backend infrastructure to manage automated node provisioning,
+                    ensuring zero downtime for users.
+                </p>
+                <div class="project-actions">
+                    <a href="https://shonnodes.qzz.io/" target="_blank" class="btn btn-primary">
+                        Visit Platform <span class="material-symbols-outlined">arrow_outward</span>
+                    </a>
+                </div>
+            </div>
+        </article>
+
+        <!-- PROJECT 2: Artic -->
+        <article class="project-showcase hidden">
+            <span class="project-number">02</span>
+
+            <div class="project-preview">
+                <img src="images/artic.png" alt="Artic Bot Dashboard">
+                <div class="glass-badge">50+ Servers</div>
+            </div>
+
+            <div class="project-info">
+                <div class="project-tags">
+                    <span class="p-tag">Automation</span>
+                    <span class="p-tag">Discord API</span>
+                </div>
+                <h2>Artic Bot</h2>
+                <p>
+                    An advanced moderation and utility bot for Discord communities.
+                    Features include auto-moderation, music streaming, and a web dashboard
+                    for configuring guild settings easily.
+                </p>
+                <div class="project-actions">
+                    <a href="https://artic.dpdns.org" target="_blank" class="btn btn-primary">
+                        View Bot <span class="material-symbols-outlined">smart_toy</span>
+                    </a>
+                </div>
+            </div>
+        </article>
+
+        <!-- PROJECT 3: Portfolio -->
+        <article class="project-showcase hidden">
+            <span class="project-number">03</span>
+
+            <div class="project-preview">
+                <img src="images/devshon.png" alt="Portfolio Design">
+                <div class="glass-badge">Design</div>
+            </div>
+
+            <div class="project-info">
+                <div class="project-tags">
+                    <span class="p-tag">Frontend</span>
+                    <span class="p-tag">UI/UX</span>
+                </div>
+                <h2>Personal Portfolio</h2>
+                <p>
+                    The website you are looking at right now. Built with a focus on
+                    "Glassmorphism" aesthetics, smooth scroll animations, and a fully
+                    responsive layout to showcase my work professionally.
+                </p>
+                <div class="project-actions">
+                    <a href="index.html" class="btn btn-outline">
+                        View Source <span class="material-symbols-outlined">code</span>
+                    </a>
+                </div>
+            </div>
+        </article>
+
+    </div>
+
+    <footer>
+        <div class="footer-grid">
+            <div class="footer-brand">
+                <div class="logo">DevShon</div>
+                <p>Building high-performance digital masterpieces and automated systems for the modern web.</p>
+                <div class="footer-meta" style="margin-top: 25px;">
+                    <div class="footer-social-grid" style="margin-top: 25px;">
+                        <a href="https://github.com/shonjohn7147" target="_blank" class="footer-social-card"
+                            title="GitHub">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path
+                                    d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22">
+                                </path>
+                            </svg>
+                        </a>
+                        <a href="https://discord.gg/PvFNTYws4H" target="_blank" class="footer-social-card"
+                            title="Discord">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                fill="currentColor">
+                                <path
+                                    d="M20.317 4.37a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.21.375-.444.864-.608 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.617-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.677 4.37a.07.07 0 0 0-.032.027C.533 9.046-.32 13.58.099 18.057a.082.082 0 0 0 .031.057 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128 10.2 10.2 0 0 0 .372-.292.074.074 0 0 1 .077-.01c3.928 1.793 8.18 1.793 12.062 0a.074.074 0 0 1 .078.01c.12.098.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.839 19.839 0 0 0 6.002-3.03.078.078 0 0 0 .032-.054c.5-5.177-.838-9.674-3.549-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.956 2.419-2.157 2.419zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.21 0 2.176 1.096 2.157 2.42 0 1.333-.946 2.419-2.157 2.419z" />
+                            </svg>
+                        </a>
+                        <a href="https://youtube.com/@shonjohn7147" target="_blank" class="footer-social-card"
+                            title="YouTube">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <path
+                                    d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.33 29 29 0 0 0-.46-5.25z">
+                                </path>
+                                <polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02"></polygon>
+                            </svg>
+                        </a>
+                        <a href="https://instagram.com/shonjohn7147" target="_blank" class="footer-social-card"
+                            title="Instagram">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round">
+                                <rect x="2" y="2" width="20" height="20" rx="5" ry="5"></rect>
+                                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"></path>
+                                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"></line>
+                            </svg>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer-col">
+                <h4>Navigation</h4>
+                <div class="footer-links">
+                    <a href="index.html">Home</a>
+                    <a href="services.html">Services</a>
+                    <a href="projects.html">Projects</a>
+                    <a href="about.html">About</a>
+                    <a href="contact.html">Contact</a>
+                </div>
+            </div>
+
+            <div class="footer-col">
+                <h4>Services</h4>
+                <div class="footer-links">
+                    <a href="services.html">Web Development</a>
+                    <a href="services.html">Automation & Bots</a>
+                    <a href="services.html">Backend & API</a>
+                    <a href="services.html">Hosting & DevOps</a>
+                </div>
+            </div>
+
+            <div class="footer-col">
+                <h4>Let's Talk</h4>
+                <div class="footer-links">
+                    <a href="mailto:support@devshon.qzz.io">support@devshon.qzz.io</a>
+                    <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 10px;">Available for new projects
+                        and collaborations worldwide.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer-bottom">
+            <div class="copyright">
+                &copy; <span id="year"></span> Shon John. All rights reserved.
+            </div>
+            <div class="footer-meta">
+                <div class="meta-item">
+                    <span class="material-symbols-outlined">public</span>
+                    Remote / Worldwide
+                </div>
+                <div class="meta-item">
+                    <span class="material-symbols-outlined">bolt</span>
+                    Ready to Build
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
