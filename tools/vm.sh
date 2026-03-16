@@ -116,8 +116,13 @@ load_vm_config() {
         # Clear previous variables
         unset VM_NAME OS_TYPE CODENAME IMG_URL HOSTNAME USERNAME PASSWORD
         unset DISK_SIZE MEMORY CPUS SSH_PORT GUI_MODE PORT_FORWARDS IMG_FILE SEED_FILE INSTALL_ISO CREATED
+        unset VNC_ENABLED VNC_PORT CLOUDFLARED_ENABLED
         
         source "$config_file"
+        # Set defaults for new variables if missing
+        VNC_ENABLED="${VNC_ENABLED:-false}"
+        VNC_PORT="${VNC_PORT:-5901}"
+        CLOUDFLARED_ENABLED="${CLOUDFLARED_ENABLED:-false}"
         return 0
     else
         print_status "ERROR" "Configuration for VM '$vm_name' not found"
@@ -142,6 +147,9 @@ MEMORY="$MEMORY"
 CPUS="$CPUS"
 SSH_PORT="$SSH_PORT"
 GUI_MODE="$GUI_MODE"
+VNC_ENABLED="$VNC_ENABLED"
+VNC_PORT="$VNC_PORT"
+CLOUDFLARED_ENABLED="$CLOUDFLARED_ENABLED"
 PORT_FORWARDS="$PORT_FORWARDS"
 IMG_FILE="$IMG_FILE"
 SEED_FILE="$SEED_FILE"
@@ -274,6 +282,37 @@ create_new_vm() {
         done
     fi
 
+    # Remote Access Options
+    while true; do
+        read -p "$(print_status "INPUT" "Enable VNC access? (y/n, default: n): ")" vnc_input
+        VNC_ENABLED=false
+        vnc_input="${vnc_input:-n}"
+        if [[ "$vnc_input" =~ ^[Yy]$ ]]; then 
+            VNC_ENABLED=true
+            read -p "$(print_status "INPUT" "VNC Port (default: 5901): ")" VNC_PORT
+            VNC_PORT="${VNC_PORT:-5901}"
+            break
+        elif [[ "$vnc_input" =~ ^[Nn]$ ]]; then
+            break
+        else
+            print_status "ERROR" "Please answer y or n"
+        fi
+    done
+
+    while true; do
+        read -p "$(print_status "INPUT" "Enable Cloudflared tunnel? (y/n, default: n): ")" cf_input
+        CLOUDFLARED_ENABLED=false
+        cf_input="${cf_input:-n}"
+        if [[ "$cf_input" =~ ^[Yy]$ ]]; then 
+            CLOUDFLARED_ENABLED=true
+            break
+        elif [[ "$cf_input" =~ ^[Nn]$ ]]; then
+            break
+        else
+            print_status "ERROR" "Please answer y or n"
+        fi
+    done
+
     # Additional network options
     read -p "$(print_status "INPUT" "Additional port forwards (e.g., 8080:80, press Enter for none): ")" PORT_FORWARDS
 
@@ -305,7 +344,7 @@ setup_vm_image() {
             print_status "INFO" "Windows ISO already exists. Skipping download."
         else
             print_status "INFO" "Downloading Windows ISO from $IMG_URL..."
-            if ! wget -U "Mozilla/5.0" --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
+            if ! wget -U "Mozilla/5.0" --prefer-family=IPv6 --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
                 print_status "ERROR" "Failed to download image from $IMG_URL"
                 exit 1
             fi
@@ -326,7 +365,7 @@ setup_vm_image() {
         print_status "INFO" "Image file already exists. Skipping download."
     else
         print_status "INFO" "Downloading image from $IMG_URL..."
-        if ! wget -U "Mozilla/5.0" --progress=bar:force "$IMG_URL" -O "$IMG_FILE.tmp"; then
+        if ! wget -U "Mozilla/5.0" --prefer-family=IPv6 --progress=bar:force "$IMG_URL" -O "$IMG_FILE.tmp"; then
             print_status "ERROR" "Failed to download image from $IMG_URL"
             exit 1
         fi
@@ -412,7 +451,7 @@ start_vm() {
                 -drive "file=$INSTALL_ISO,media=cdrom"
                 -boot menu=on
                 -device virtio-net-pci,netdev=n0
-                -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
+                -netdev "user,id=n0,ipv6=on,ipv6-net=fd00::/64,hostfwd=tcp::$SSH_PORT-:22"
             )
         else
             qemu_cmd+=(
@@ -420,7 +459,7 @@ start_vm() {
                 -drive "file=$SEED_FILE,format=raw,if=virtio"
                 -boot order=c
                 -device virtio-net-pci,netdev=n0
-                -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
+                -netdev "user,id=n0,ipv6=on,ipv6-net=fd00::/64,hostfwd=tcp::$SSH_PORT-:22"
             )
         fi
 
@@ -434,11 +473,29 @@ start_vm() {
             done
         fi
 
-        # Add GUI or console mode
-        if [[ "$GUI_MODE" == true ]]; then
-            qemu_cmd+=(-vga virtio -display gtk,gl=on)
+        # Add GUI, VNC, or console mode
+        if [[ "$VNC_ENABLED" == true ]]; then
+            local vnc_display=$((VNC_PORT - 5900))
+            qemu_cmd+=(-vnc ":$vnc_display" -display none)
+            print_status "SUCCESS" "VNC enabled on port $VNC_PORT (: $vnc_display)"
+        elif [[ "$GUI_MODE" == true ]]; then
+            qemu_cmd+=(-vga virtio -display gtk)
         else
             qemu_cmd+=(-nographic -serial mon:stdio)
+        fi
+
+        # Add Cloudflared tunnel if enabled
+        if [[ "$CLOUDFLARED_ENABLED" == true ]]; then
+            if command -v cloudflared &> /dev/null; then
+                print_status "INFO" "Starting Cloudflared tunnel for VNC and SSH..."
+                # Run tunnel in background and save PID if needed, or just print command
+                print_status "INFO" "Run this in another terminal to expose VNC:"
+                echo "  cloudflared tunnel --url tcp://localhost:$VNC_PORT"
+                print_status "INFO" "Run this in another terminal to expose SSH:"
+                echo "  cloudflared tunnel --url tcp://localhost:$SSH_PORT"
+            else
+                print_status "WARN" "cloudflared not found. Tunnel could not be started automatically."
+            fi
         fi
 
         # Add performance enhancements
@@ -489,10 +546,13 @@ show_vm_info() {
         echo "CPUs: $CPUS"
         echo "Disk: $DISK_SIZE"
         echo "GUI Mode: $GUI_MODE"
+        echo "VNC Enabled: $VNC_ENABLED (Port: $VNC_PORT)"
+        echo "Cloudflared: $CLOUDFLARED_ENABLED"
         echo "Port Forwards: ${PORT_FORWARDS:-None}"
         echo "Created: $CREATED"
         echo "Image File: $IMG_FILE"
         echo "Seed File: $SEED_FILE"
+        echo "Install ISO: ${INSTALL_ISO:-None}"
         echo "=========================================="
         echo
         read -p "$(print_status "INPUT" "Press Enter to continue...")"
@@ -543,10 +603,12 @@ edit_vm_config() {
             echo "  3) Password"
             echo "  4) SSH Port"
             echo "  5) GUI Mode"
-            echo "  6) Port Forwards"
-            echo "  7) Memory (RAM)"
-            echo "  8) CPU Count"
-            echo "  9) Disk Size"
+            echo "  6) VNC Access"
+            echo "  7) Cloudflared Tunnel"
+            echo "  8) Port Forwards"
+            echo "  9) Memory (RAM)"
+            echo " 10) CPU Count"
+            echo " 11) Disk Size"
             echo "  0) Back to main menu"
             
             read -p "$(print_status "INPUT" "Enter your choice: ")" edit_choice
@@ -623,10 +685,44 @@ edit_vm_config() {
                     fi
                     ;;
                 6)
+                    while true; do
+                        read -p "$(print_status "INPUT" "Enable VNC? (y/n, current: $VNC_ENABLED): ")" vnc_input
+                        if [[ "$vnc_input" =~ ^[Yy]$ ]]; then 
+                            VNC_ENABLED=true
+                            read -p "$(print_status "INPUT" "Enter VNC port (current: $VNC_PORT): ")" VNC_PORT
+                            VNC_PORT="${VNC_PORT:-5901}"
+                            break
+                        elif [[ "$vnc_input" =~ ^[Nn]$ ]]; then
+                            VNC_ENABLED=false
+                            break
+                        elif [ -z "$vnc_input" ]; then
+                            break
+                        else
+                            print_status "ERROR" "Please answer y or n"
+                        fi
+                    done
+                    ;;
+                7)
+                    while true; do
+                        read -p "$(print_status "INPUT" "Enable Cloudflared? (y/n, current: $CLOUDFLARED_ENABLED): ")" cf_input
+                        if [[ "$cf_input" =~ ^[Yy]$ ]]; then 
+                            CLOUDFLARED_ENABLED=true
+                            break
+                        elif [[ "$cf_input" =~ ^[Nn]$ ]]; then
+                            CLOUDFLARED_ENABLED=false
+                            break
+                        elif [ -z "$cf_input" ]; then
+                            break
+                        else
+                            print_status "ERROR" "Please answer y or n"
+                        fi
+                    done
+                    ;;
+                8)
                     read -p "$(print_status "INPUT" "Additional port forwards (current: ${PORT_FORWARDS:-None}): ")" new_port_forwards
                     PORT_FORWARDS="${new_port_forwards:-$PORT_FORWARDS}"
                     ;;
-                7)
+                9)
                     while true; do
                         read -p "$(print_status "INPUT" "Enter new memory in MB (current: $MEMORY): ")" new_memory
                         new_memory="${new_memory:-$MEMORY}"
@@ -636,7 +732,7 @@ edit_vm_config() {
                         fi
                     done
                     ;;
-                8)
+                10)
                     while true; do
                         read -p "$(print_status "INPUT" "Enter new CPU count (current: $CPUS): ")" new_cpus
                         new_cpus="${new_cpus:-$CPUS}"
@@ -646,7 +742,7 @@ edit_vm_config() {
                         fi
                     done
                     ;;
-                9)
+                11)
                     while true; do
                         read -p "$(print_status "INPUT" "Enter new disk size (current: $DISK_SIZE): ")" new_disk_size
                         new_disk_size="${new_disk_size:-$DISK_SIZE}"
@@ -776,6 +872,38 @@ show_vm_performance() {
     fi
 }
 
+# Function for system checkup
+system_checkup() {
+    echo "=========================================="
+    print_status "INFO" "System Checkup"
+    echo "=========================================="
+    
+    # Check IPs
+    local ipv4_local=$(hostname -I | awk '{print $1}')
+    local ipv4_public=$(curl -s4 ifconfig.me || echo "Not available")
+    local ipv6_local=$(hostname -I | awk '{print $2}')
+    local ipv6_public=$(curl -s6 ifconfig.me || echo "Not available")
+    
+    echo "Local IPv4:  $ipv4_local"
+    echo "Public IPv4: $ipv4_public"
+    echo "Local IPv6:  $ipv6_local"
+    echo "Public IPv6: $ipv6_public"
+    echo
+    
+    # Check Dependencies
+    local deps=("qemu-system-x86_64" "wget" "cloud-localds" "qemu-img" "cloudflared")
+    for dep in "${deps[@]}"; do
+        if command -v "$dep" &> /dev/null; then
+            print_status "SUCCESS" "Dependency '$dep' found"
+        else
+            print_status "WARN" "Dependency '$dep' MISSING"
+        fi
+    done
+    
+    echo "=========================================="
+    read -p "$(print_status "INPUT" "Press Enter to continue...")"
+}
+
 # Main menu function
 main_menu() {
     while true; do
@@ -807,6 +935,7 @@ main_menu() {
             echo "  7) Resize VM disk"
             echo "  8) Show VM performance"
         fi
+        echo "  9) System Checkup"
         echo "  0) Exit"
         echo
         
@@ -885,6 +1014,9 @@ main_menu() {
                         print_status "ERROR" "Invalid selection"
                     fi
                 fi
+                ;;
+            9)
+                system_checkup
                 ;;
             0)
                 print_status "INFO" "Goodbye!"
