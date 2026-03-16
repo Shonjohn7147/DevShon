@@ -115,7 +115,7 @@ load_vm_config() {
     if [[ -f "$config_file" ]]; then
         # Clear previous variables
         unset VM_NAME OS_TYPE CODENAME IMG_URL HOSTNAME USERNAME PASSWORD
-        unset DISK_SIZE MEMORY CPUS SSH_PORT GUI_MODE PORT_FORWARDS IMG_FILE SEED_FILE CREATED
+        unset DISK_SIZE MEMORY CPUS SSH_PORT GUI_MODE PORT_FORWARDS IMG_FILE SEED_FILE INSTALL_ISO CREATED
         
         source "$config_file"
         return 0
@@ -145,6 +145,7 @@ GUI_MODE="$GUI_MODE"
 PORT_FORWARDS="$PORT_FORWARDS"
 IMG_FILE="$IMG_FILE"
 SEED_FILE="$SEED_FILE"
+INSTALL_ISO="$INSTALL_ISO"
 CREATED="$CREATED"
 EOF
     
@@ -254,25 +255,35 @@ create_new_vm() {
         fi
     done
 
-    while true; do
-        read -p "$(print_status "INPUT" "Enable GUI mode? (y/n, default: n): ")" gui_input
-        GUI_MODE=false
-        gui_input="${gui_input:-n}"
-        if [[ "$gui_input" =~ ^[Yy]$ ]]; then 
-            GUI_MODE=true
-            break
-        elif [[ "$gui_input" =~ ^[Nn]$ ]]; then
-            break
-        else
-            print_status "ERROR" "Please answer y or n"
-        fi
-    done
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        print_status "INFO" "Windows requires GUI mode for installation. Forcing GUI mode enabled."
+        GUI_MODE=true
+    else
+        while true; do
+            read -p "$(print_status "INPUT" "Enable GUI mode? (y/n, default: n): ")" gui_input
+            GUI_MODE=false
+            gui_input="${gui_input:-n}"
+            if [[ "$gui_input" =~ ^[Yy]$ ]]; then 
+                GUI_MODE=true
+                break
+            elif [[ "$gui_input" =~ ^[Nn]$ ]]; then
+                break
+            else
+                print_status "ERROR" "Please answer y or n"
+            fi
+        done
+    fi
 
     # Additional network options
     read -p "$(print_status "INPUT" "Additional port forwards (e.g., 8080:80, press Enter for none): ")" PORT_FORWARDS
 
     IMG_FILE="$VM_DIR/$VM_NAME.img"
     SEED_FILE="$VM_DIR/$VM_NAME-seed.iso"
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        INSTALL_ISO="$VM_DIR/${OS_TYPE}_${CODENAME}.iso"
+    else
+        INSTALL_ISO=""
+    fi
     CREATED="$(date)"
 
     # Download and setup VM image
@@ -288,6 +299,28 @@ setup_vm_image() {
     
     # Create VM directory if it doesn't exist
     mkdir -p "$VM_DIR"
+    
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        # Check if ISO already exists
+        if [[ -f "$INSTALL_ISO" ]]; then
+            print_status "INFO" "Windows ISO already exists. Skipping download."
+        else
+            print_status "INFO" "Downloading Windows ISO from $IMG_URL..."
+            if ! wget --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
+                print_status "ERROR" "Failed to download image from $IMG_URL"
+                exit 1
+            fi
+            mv "$INSTALL_ISO.tmp" "$INSTALL_ISO"
+        fi
+        
+        if [[ ! -f "$IMG_FILE" ]]; then
+            print_status "INFO" "Creating new blank disk image for Windows..."
+            qemu-img create -f qcow2 "$IMG_FILE" "$DISK_SIZE"
+        fi
+        
+        print_status "SUCCESS" "VM '$VM_NAME' created successfully."
+        return 0
+    fi
     
     # Check if image already exists
     if [[ -f "$IMG_FILE" ]]; then
@@ -359,8 +392,8 @@ start_vm() {
             return 1
         fi
         
-        # Check if seed file exists
-        if [[ ! -f "$SEED_FILE" ]]; then
+        # Check if seed file exists (skip for windows)
+        if [[ "$OS_TYPE" != "windows" ]] && [[ ! -f "$SEED_FILE" ]]; then
             print_status "WARN" "Seed file not found, recreating..."
             setup_vm_image
         fi
@@ -372,12 +405,25 @@ start_vm() {
             -m "$MEMORY"
             -smp "$CPUS"
             -cpu host
-            -drive "file=$IMG_FILE,format=qcow2,if=virtio"
-            -drive "file=$SEED_FILE,format=raw,if=virtio"
-            -boot order=c
-            -device virtio-net-pci,netdev=n0
-            -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
         )
+
+        if [[ "$OS_TYPE" == "windows" ]]; then
+            qemu_cmd+=(
+                -drive "file=$IMG_FILE,format=qcow2,if=ide"
+                -drive "file=$INSTALL_ISO,media=cdrom"
+                -boot menu=on
+                -device virtio-net-pci,netdev=n0
+                -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
+            )
+        else
+            qemu_cmd+=(
+                -drive "file=$IMG_FILE,format=qcow2,if=virtio"
+                -drive "file=$SEED_FILE,format=raw,if=virtio"
+                -boot order=c
+                -device virtio-net-pci,netdev=n0
+                -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
+            )
+        fi
 
         # Add port forwards if specified
         if [[ -n "$PORT_FORWARDS" ]]; then
@@ -556,22 +602,26 @@ edit_vm_config() {
                     done
                     ;;
                 5)
-                    while true; do
-                        read -p "$(print_status "INPUT" "Enable GUI mode? (y/n, current: $GUI_MODE): ")" gui_input
-                        gui_input="${gui_input:-}"
-                        if [[ "$gui_input" =~ ^[Yy]$ ]]; then 
-                            GUI_MODE=true
-                            break
-                        elif [[ "$gui_input" =~ ^[Nn]$ ]]; then
-                            GUI_MODE=false
-                            break
-                        elif [ -z "$gui_input" ]; then
-                            # Keep current value if user just pressed Enter
-                            break
-                        else
-                            print_status "ERROR" "Please answer y or n"
-                        fi
-                    done
+                    if [[ "$OS_TYPE" == "windows" ]]; then
+                        print_status "ERROR" "GUI mode cannot be disabled for Windows VMs."
+                    else
+                        while true; do
+                            read -p "$(print_status "INPUT" "Enable GUI mode? (y/n, current: $GUI_MODE): ")" gui_input
+                            gui_input="${gui_input:-}"
+                            if [[ "$gui_input" =~ ^[Yy]$ ]]; then 
+                                GUI_MODE=true
+                                break
+                            elif [[ "$gui_input" =~ ^[Nn]$ ]]; then
+                                GUI_MODE=false
+                                break
+                            elif [ -z "$gui_input" ]; then
+                                # Keep current value if user just pressed Enter
+                                break
+                            else
+                                print_status "ERROR" "Please answer y or n"
+                            fi
+                        done
+                    fi
                     ;;
                 6)
                     read -p "$(print_status "INPUT" "Additional port forwards (current: ${PORT_FORWARDS:-None}): ")" new_port_forwards
@@ -862,7 +912,7 @@ mkdir -p "$VM_DIR"
 
 # Supported OS list
 declare -A OS_OPTIONS=(
-    ["Ubuntu 22.04"]="ubuntu|jammy|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu22|ubuntu|ubuntu"
+        ["Ubuntu 22.04"]="ubuntu|jammy|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu22|ubuntu|ubuntu"
     ["Ubuntu 24.04"]="ubuntu|noble|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu24|ubuntu|ubuntu"
     ["Debian 11"]="debian|bullseye|https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2|debian11|debian|debian"
     ["Debian 12"]="debian|bookworm|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian12|debian|debian"
@@ -870,6 +920,8 @@ declare -A OS_OPTIONS=(
     ["CentOS Stream 9"]="centos|stream9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos9|centos|centos"
     ["AlmaLinux 9"]="almalinux|9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|almalinux9|alma|alma"
     ["Rocky Linux 9"]="rockylinux|9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky9|rocky|rocky"
+    ["Windows Server 2022"]="windows|2022|https://software-download.microsoft.com/download/sg/20348.169.210806-2348.fe_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso|win2022|Administrator|password"
+    ["Windows 11"]="windows|11|https://software-download.microsoft.com/download/pr/22621.525.220925-0207.ni_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso|win11|Administrator|password"
 )
 
 # Start the main menu
