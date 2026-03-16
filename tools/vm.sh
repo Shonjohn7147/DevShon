@@ -69,7 +69,7 @@ validate_input() {
             fi
             ;;
         "username")
-            if ! [[ "$value" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+            if ! [[ "$value" =~ ^[a-zA-Z_][a-zA-Z0-9_-]*$ ]]; then
                 print_status "ERROR" "Username must start with a letter or underscore, and contain only letters, numbers, hyphens, and underscores"
                 return 1
             fi
