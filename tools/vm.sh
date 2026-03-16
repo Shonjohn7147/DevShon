@@ -477,6 +477,11 @@ start_vm() {
         fi
 
         # Add GUI, VNC, or console mode
+        if [[ "$GUI_MODE" == true ]] && [[ -z "$DISPLAY" ]] && [[ "$VNC_ENABLED" == false ]]; then
+            print_status "WARN" "No display detected (headless environment). Automatically enabling VNC..."
+            VNC_ENABLED=true
+        fi
+
         if [[ "$VNC_ENABLED" == true ]]; then
             local vnc_display=$((VNC_PORT - 5900))
             qemu_cmd+=(-vnc ":$vnc_display" -display none)
