@@ -293,7 +293,6 @@ create_new_vm() {
     save_vm_config
 }
 
-# Function to setup VM image
 setup_vm_image() {
     print_status "INFO" "Downloading and preparing image..."
     
@@ -306,7 +305,7 @@ setup_vm_image() {
             print_status "INFO" "Windows ISO already exists. Skipping download."
         else
             print_status "INFO" "Downloading Windows ISO from $IMG_URL..."
-            if ! wget --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
+            if ! wget -U "Mozilla/5.0" --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
                 print_status "ERROR" "Failed to download image from $IMG_URL"
                 exit 1
             fi
@@ -327,7 +326,7 @@ setup_vm_image() {
         print_status "INFO" "Image file already exists. Skipping download."
     else
         print_status "INFO" "Downloading image from $IMG_URL..."
-        if ! wget --progress=bar:force "$IMG_URL" -O "$IMG_FILE.tmp"; then
+        if ! wget -U "Mozilla/5.0" --progress=bar:force "$IMG_URL" -O "$IMG_FILE.tmp"; then
             print_status "ERROR" "Failed to download image from $IMG_URL"
             exit 1
         fi
@@ -920,8 +919,8 @@ declare -A OS_OPTIONS=(
     ["CentOS Stream 9"]="centos|stream9|https://cloud.centos.org/centos/9-stream/x86_64/images/CentOS-Stream-GenericCloud-9-latest.x86_64.qcow2|centos9|centos|centos"
     ["AlmaLinux 9"]="almalinux|9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|almalinux9|alma|alma"
     ["Rocky Linux 9"]="rockylinux|9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky9|rocky|rocky"
-    ["Windows Server 2022"]="windows|2022|https://software-download.microsoft.com/download/sg/20348.169.210806-2348.fe_release_svc_refresh_SERVER_EVAL_x64FRE_en-us.iso|win2022|Administrator|password"
-    ["Windows 11"]="windows|11|https://software-download.microsoft.com/download/pr/22621.525.220925-0207.ni_release_svc_refresh_CLIENTENTERPRISEEVAL_OEMRET_x64FRE_en-us.iso|win11|Administrator|password"
+    ["Windows Server 2022"]="windows|2022|https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso|win2022|Administrator|password"
+    ["Windows 11"]="windows|11|https://go.microsoft.com/fwlink/p/?LinkID=2193240|win11|Administrator|password"
 )
 
 # Start the main menu
