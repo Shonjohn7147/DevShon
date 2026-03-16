@@ -437,13 +437,16 @@ start_vm() {
         fi
         
         # Base QEMU command
-        local qemu_cmd=(
-            qemu-system-x86_64
-            -enable-kvm
-            -m "$MEMORY"
-            -smp "$CPUS"
-            -cpu host
-        )
+        local qemu_cmd=(qemu-system-x86_64 -m "$MEMORY" -smp "$CPUS")
+
+        # Check for KVM availability
+        if [ -w /dev/kvm ] && grep -qE "vmx|svm" /proc/cpuinfo; then
+            print_status "INFO" "KVM acceleration enabled."
+            qemu_cmd+=(-enable-kvm -cpu host)
+        else
+            print_status "WARN" "KVM not accessible. Falling back to software emulation (TCG). This will be slower."
+            qemu_cmd+=(-cpu max)
+        fi
 
         if [[ "$OS_TYPE" == "windows" ]]; then
             qemu_cmd+=(
@@ -888,6 +891,16 @@ system_checkup() {
     echo "Public IPv4: $ipv4_public"
     echo "Local IPv6:  $ipv6_local"
     echo "Public IPv6: $ipv6_public"
+    echo
+    
+    # Check KVM
+    if [ -w /dev/kvm ]; then
+        print_status "SUCCESS" "KVM acceleration is AVAILABLE and ACCESSIBLE."
+    elif [ -e /dev/kvm ]; then
+        print_status "WARN" "KVM exists but is NOT ACCESSIBLE (Permission denied). Try: sudo usermod -aG kvm \$USER"
+    else
+        print_status "ERROR" "KVM is NOT AVAILABLE on this system."
+    fi
     echo
     
     # Check Dependencies
