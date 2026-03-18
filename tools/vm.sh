@@ -124,11 +124,22 @@ load_vm_config() {
         # Load the configuration
         source "$config_file"
         
-        # Set defaults
+        # Set defaults to avoid "unbound variable" crashes
+        SSH_PORT="${SSH_PORT:-2222}"
         VNC_ENABLED="${VNC_ENABLED:-false}"
         VNC_PORT="${VNC_PORT:-5901}"
+        GUI_MODE="${GUI_MODE:-false}"
+        MEMORY="${MEMORY:-2048}"
+        CPUS="${CPUS:-2}"
+        DISK_SIZE="${DISK_SIZE:-20G}"
+        USERNAME="${USERNAME:-admin}"
+        PASSWORD="${PASSWORD:-password}"
+        OS_TYPE="${OS_TYPE:-ubuntu}"
         UNATTEND_ISO="${UNATTEND_ISO:-}"
         VIRTIO_ISO="${VIRTIO_ISO:-}"
+        IMG_FILE="${IMG_FILE:-$VM_DIR/$vm_name.qcow2}"
+        SEED_FILE="${SEED_FILE:-$VM_DIR/$vm_name-seed.img}"
+        INSTALL_ISO="${INSTALL_ISO:-}"
         return 0
     else
         print_status "ERROR" "Configuration for VM '$vm_name' not found"
@@ -612,8 +623,10 @@ start_vm() {
         fi
 
         # Add GUI, VNC, or console mode
-        if [[ "$GUI_MODE" == true ]] && [[ -z "$DISPLAY" ]] && [[ "$VNC_ENABLED" == false ]]; then
-            print_status "WARN" "No display detected (headless environment). Automatically enabling VNC..."
+        # Only auto-enable VNC if GUI_MODE is true AND VNC was NOT explicitly disabled (it's false by default)
+        # However, the user said "avoid vnc", so we should be careful here.
+        if [[ "$GUI_MODE" == true ]] && [[ -z "$DISPLAY" ]] && [[ "$VNC_ENABLED" == "auto" ]]; then
+            print_status "WARN" "No display detected. Enabling VNC as requested by GUI_MODE..."
             VNC_ENABLED=true
         fi
 
@@ -626,12 +639,15 @@ start_vm() {
                 print_status "INFO" "Since you are in TCG mode, the screen may take 1-2 minutes to appear."
             fi
             print_status "INFO" "Terminal Console: Serial output will be shown below (if supported by OS)."
-        elif [[ "$GUI_MODE" == true ]]; then
+        elif [[ "$GUI_MODE" == true ]] && [[ -n "$DISPLAY" ]]; then
             qemu_cmd+=(-vga virtio -display gtk -serial mon:stdio)
             print_status "INFO" "Opening GUI window... (Serial output also visible in terminal)"
         else
             qemu_cmd+=(-nographic -serial mon:stdio)
             print_status "INFO" "Starting in terminal mode (nographic)."
+            if [[ "$GUI_MODE" == true ]]; then
+                print_status "WARN" "GUI mode requested but no display found. Running headless."
+            fi
         fi
 
         # Add performance enhancements
@@ -1033,6 +1049,51 @@ system_checkup() {
     
     echo "=========================================="
     read -p "$(print_status "INPUT" "Press Enter to continue...")"
+}
+
+# Function for system checkup
+system_checkup() {
+    display_header
+    print_status "INFO" "Running System Checkup..."
+    echo "------------------------------------------------------------------------"
+    
+    # 1. KVM Check
+    if [ -w /dev/kvm ] && grep -qE "vmx|svm" /proc/cpuinfo; then
+        print_status "SUCCESS" "KVM Acceleration: AVAILABLE"
+    else
+        print_status "WARN" "KVM Acceleration: NOT AVAILABLE (Performance will be slow)"
+        echo "   Tip: Check BIOS virtualization settings and 'lsmod | grep kvm'"
+    fi
+    
+    # 2. Dependencies Check
+    local deps=("qemu-system-x86_64" "wget" "cloud-localds" "qemu-img" "genisoimage" "git" "curl")
+    local missing=0
+    for dep in "${deps[@]}"; do
+        if command -v "$dep" &> /dev/null; then
+            printf "  %-20s | \033[1;32mINSTALLED\033[0m\n" "$dep"
+        else
+            printf "  %-20s | \033[1;31mNOT FOUND\033[0m\n" "$dep"
+            missing=$((missing + 1))
+        fi
+    done
+    
+    # 3. Disk Space Check
+    local free_space=$(df -h "$VM_DIR" | tail -1 | awk '{print $4}')
+    print_status "INFO" "Free Space in $VM_DIR: $free_space"
+    
+    # 4. Networking Check
+    if ip addr show scope global | grep -q "inet "; then
+        print_status "SUCCESS" "Network: ONLINE"
+    else
+        print_status "ERROR" "Network: OFFLINE"
+    fi
+    
+    echo "------------------------------------------------------------------------"
+    if [ $missing -gt 0 ]; then
+        print_status "WARN" "Found $missing missing dependencies. Some features may not work."
+    else
+        print_status "SUCCESS" "System is ready to go!"
+    fi
 }
 
 # Function for system dashboard
