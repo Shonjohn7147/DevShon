@@ -80,7 +80,7 @@ validate_input() {
 
 # Function to check dependencies
 check_dependencies() {
-    local deps=("qemu-system-x86_64" "wget" "cloud-localds" "qemu-img")
+    local deps=("qemu-system-x86_64" "wget" "cloud-localds" "qemu-img" "genisoimage")
     local missing_deps=()
     
     for dep in "${deps[@]}"; do
@@ -100,7 +100,11 @@ check_dependencies() {
 cleanup() {
     if [ -f "user-data" ]; then rm -f "user-data"; fi
     if [ -f "meta-data" ]; then rm -f "meta-data"; fi
+    if [ -f "autounattend.xml" ]; then rm -f "autounattend.xml"; fi
 }
+
+# VirtIO Drivers for Windows
+VIRTIO_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-virtio/virtio-win.iso"
 
 # Function to get all VM configurations
 get_vm_list() {
@@ -113,21 +117,131 @@ load_vm_config() {
     local config_file="$VM_DIR/$vm_name.conf"
     
     if [[ -f "$config_file" ]]; then
-        # Clear previous variables
-        unset VM_NAME OS_TYPE CODENAME IMG_URL HOSTNAME USERNAME PASSWORD
+        # Clear previous variables to avoid "unbound variable" errors or stale data
         unset DISK_SIZE MEMORY CPUS SSH_PORT GUI_MODE PORT_FORWARDS IMG_FILE SEED_FILE INSTALL_ISO CREATED
-        unset VNC_ENABLED VNC_PORT CLOUDFLARED_ENABLED
+        unset VNC_ENABLED VNC_PORT UNATTEND_ISO VIRTIO_ISO
         
+        # Load the configuration
         source "$config_file"
-        # Set defaults for new variables if missing
+        
+        # Set defaults
         VNC_ENABLED="${VNC_ENABLED:-false}"
         VNC_PORT="${VNC_PORT:-5901}"
-        CLOUDFLARED_ENABLED="${CLOUDFLARED_ENABLED:-false}"
+        UNATTEND_ISO="${UNATTEND_ISO:-}"
+        VIRTIO_ISO="${VIRTIO_ISO:-}"
         return 0
     else
         print_status "ERROR" "Configuration for VM '$vm_name' not found"
         return 1
     fi
+}
+
+# Function to generate autounattend.xml for Windows
+generate_windows_unattend() {
+    cat > autounattend.xml <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+    <settings pass="windowsPE">
+        <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WCM/2004/xml" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <DiskConfiguration>
+                <Disk wcm:action="add">
+                    <CreatePartitions>
+                        <CreatePartition wcm:action="add">
+                            <Order>1</Order>
+                            <Type>Primary</Type>
+                            <Extend>true</Extend>
+                        </CreatePartition>
+                    </CreatePartitions>
+                    <ModifyPartitions>
+                        <ModifyPartition wcm:action="add">
+                            <Active>true</Active>
+                            <Format>NTFS</Format>
+                            <Label>Windows</Label>
+                            <Order>1</Order>
+                            <PartitionID>1</PartitionID>
+                        </ModifyPartition>
+                    </ModifyPartitions>
+                    <DiskID>0</DiskID>
+                    <WillShowUI>OnError</WillShowUI>
+                </Disk>
+            </DiskConfiguration>
+            <UserData>
+                <AcceptEula>true</AcceptEula>
+                <FullName>$USERNAME</FullName>
+                <Organization>Home</Organization>
+            </UserData>
+            <ImageInstall>
+                <OSImage>
+                    <InstallTo>
+                        <DiskID>0</DiskID>
+                        <PartitionID>1</PartitionID>
+                    </InstallTo>
+                </OSImage>
+            </ImageInstall>
+            <RunSynchronous>
+                <!-- Bypass Windows 11 Requirements -->
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>reg add "HKLM\SYSTEM\Setup\LabConfig" /v "BypassTPMCheck" /t REG_DWORD /d 1 /f</Path>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <Path>reg add "HKLM\SYSTEM\Setup\LabConfig" /v "BypassSecureBootCheck" /t REG_DWORD /d 1 /f</Path>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <Path>reg add "HKLM\SYSTEM\Setup\LabConfig" /v "BypassRAMCheck" /t REG_DWORD /d 1 /f</Path>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+        </component>
+        <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WCM/2004/xml" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <SetupUILanguage>
+                <UILanguage>en-US</UILanguage>
+            </SetupUILanguage>
+            <InputLocale>en-US</InputLocale>
+            <SystemLocale>en-US</SystemLocale>
+            <UILanguage>en-US</UILanguage>
+            <UserLocale>en-US</UserLocale>
+        </component>
+    </settings>
+    <settings pass="oobeSystem">
+        <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WCM/2004/xml" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+            <AutoLogon>
+                <Password>
+                    <Value>$PASSWORD</Value>
+                    <PlainText>true</PlainText>
+                </Password>
+                <Enabled>true</Enabled>
+                <Username>$USERNAME</Username>
+            </AutoLogon>
+            <UserAccounts>
+                <LocalAccounts>
+                    <LocalAccount wcm:action="add">
+                        <Password>
+                            <Value>$PASSWORD</Value>
+                            <PlainText>true</PlainText>
+                        </Password>
+                        <Description>Local Administrator</Description>
+                        <DisplayName>$USERNAME</DisplayName>
+                        <Group>Administrators</Group>
+                        <Name>$USERNAME</Name>
+                    </LocalAccount>
+                </LocalAccounts>
+            </UserAccounts>
+            <OOBE>
+                <HideEULAPage>true</HideEULAPage>
+                <HideLocalAccountScreen>true</HideLocalAccountScreen>
+                <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+                <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+                <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+                <NetworkLocation>Work</NetworkLocation>
+                <ProtectYourPC>3</ProtectYourPC>
+            </OOBE>
+            <TimeZone>UTC</TimeZone>
+        </component>
+    </settings>
+</unattend>
+EOF
 }
 
 # Function to save VM configuration
@@ -149,11 +263,12 @@ SSH_PORT="$SSH_PORT"
 GUI_MODE="$GUI_MODE"
 VNC_ENABLED="$VNC_ENABLED"
 VNC_PORT="$VNC_PORT"
-CLOUDFLARED_ENABLED="$CLOUDFLARED_ENABLED"
 PORT_FORWARDS="$PORT_FORWARDS"
 IMG_FILE="$IMG_FILE"
 SEED_FILE="$SEED_FILE"
 INSTALL_ISO="$INSTALL_ISO"
+UNATTEND_ISO="$UNATTEND_ISO"
+VIRTIO_ISO="$VIRTIO_ISO"
 CREATED="$CREATED"
 EOF
     
@@ -299,20 +414,6 @@ create_new_vm() {
         fi
     done
 
-    while true; do
-        read -p "$(print_status "INPUT" "Enable Cloudflared tunnel? (y/n, default: n): ")" cf_input
-        CLOUDFLARED_ENABLED=false
-        cf_input="${cf_input:-n}"
-        if [[ "$cf_input" =~ ^[Yy]$ ]]; then 
-            CLOUDFLARED_ENABLED=true
-            break
-        elif [[ "$cf_input" =~ ^[Nn]$ ]]; then
-            break
-        else
-            print_status "ERROR" "Please answer y or n"
-        fi
-    done
-
     # Additional network options
     read -p "$(print_status "INPUT" "Additional port forwards (e.g., 8080:80, press Enter for none): ")" PORT_FORWARDS
 
@@ -320,8 +421,12 @@ create_new_vm() {
     SEED_FILE="$VM_DIR/$VM_NAME-seed.iso"
     if [[ "$OS_TYPE" == "windows" ]]; then
         INSTALL_ISO="$VM_DIR/${OS_TYPE}_${CODENAME}.iso"
+        UNATTEND_ISO="$VM_DIR/$VM_NAME-unattend.iso"
+        VIRTIO_ISO="$VM_DIR/virtio-win.iso"
     else
         INSTALL_ISO=""
+        UNATTEND_ISO=""
+        VIRTIO_ISO=""
     fi
     CREATED="$(date)"
 
@@ -339,16 +444,35 @@ setup_vm_image() {
     mkdir -p "$VM_DIR"
     
     if [[ "$OS_TYPE" == "windows" ]]; then
-        # Check if ISO already exists
-        if [[ -f "$INSTALL_ISO" ]]; then
-            print_status "INFO" "Windows ISO already exists. Skipping download."
-        else
+        # Download Windows ISO
+        if [[ ! -f "$INSTALL_ISO" ]]; then
             print_status "INFO" "Downloading Windows ISO from $IMG_URL..."
             if ! wget -U "Mozilla/5.0" --prefer-family=IPv6 --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
                 print_status "ERROR" "Failed to download image from $IMG_URL"
                 exit 1
             fi
             mv "$INSTALL_ISO.tmp" "$INSTALL_ISO"
+        fi
+        
+        # Download VirtIO ISO
+        if [[ ! -f "$VIRTIO_ISO" ]]; then
+            print_status "INFO" "Downloading VirtIO Driver ISO..."
+            if ! wget --progress=bar:force "$VIRTIO_URL" -O "$VIRTIO_ISO.tmp"; then
+                print_status "ERROR" "Failed to download VirtIO drivers"
+                exit 1
+            fi
+            mv "$VIRTIO_ISO.tmp" "$VIRTIO_ISO"
+        fi
+
+        # Generate Unattend ISO
+        print_status "INFO" "Generating unattended installation media..."
+        generate_windows_unattend
+        if genisoimage -o "$UNATTEND_ISO" -J -R -V "UNATTEND" autounattend.xml; then
+            print_status "SUCCESS" "Unattended ISO created: $UNATTEND_ISO"
+            rm -f autounattend.xml
+        else
+            print_status "ERROR" "Failed to create unattended ISO"
+            exit 1
         fi
         
         if [[ ! -f "$IMG_FILE" ]]; then
@@ -451,11 +575,19 @@ start_vm() {
         if [[ "$OS_TYPE" == "windows" ]]; then
             qemu_cmd+=(
                 -drive "file=$IMG_FILE,format=qcow2,if=ide"
-                -drive "file=$INSTALL_ISO,media=cdrom"
-                -boot menu=on
+                -drive "file=$INSTALL_ISO,media=cdrom,readonly=on"
+                -boot d
                 -device virtio-net-pci,netdev=n0
                 -netdev "user,id=n0,ipv6=on,ipv6-net=fd00::/64,hostfwd=tcp::$SSH_PORT-:22"
             )
+            
+            # Add unattended and driver ISOs if they exist
+            if [[ -f "$UNATTEND_ISO" ]]; then
+                qemu_cmd+=(-drive "file=$UNATTEND_ISO,media=cdrom,readonly=on")
+            fi
+            if [[ -f "$VIRTIO_ISO" ]]; then
+                qemu_cmd+=(-drive "file=$VIRTIO_ISO,media=cdrom,readonly=on")
+            fi
         else
             qemu_cmd+=(
                 -drive "file=$IMG_FILE,format=qcow2,if=virtio"
@@ -492,20 +624,6 @@ start_vm() {
             qemu_cmd+=(-nographic -serial mon:stdio)
         fi
 
-        # Add Cloudflared tunnel if enabled
-        if [[ "$CLOUDFLARED_ENABLED" == true ]]; then
-            if command -v cloudflared &> /dev/null; then
-                print_status "INFO" "Starting Cloudflared tunnel for VNC and SSH..."
-                # Run tunnel in background and save PID if needed, or just print command
-                print_status "INFO" "Run this in another terminal to expose VNC:"
-                echo "  cloudflared tunnel --url tcp://localhost:$VNC_PORT"
-                print_status "INFO" "Run this in another terminal to expose SSH:"
-                echo "  cloudflared tunnel --url tcp://localhost:$SSH_PORT"
-            else
-                print_status "WARN" "cloudflared not found. Tunnel could not be started automatically."
-            fi
-        fi
-
         # Add performance enhancements
         qemu_cmd+=(
             -device virtio-balloon-pci
@@ -530,6 +648,7 @@ delete_vm() {
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         if load_vm_config "$vm_name"; then
             rm -f "$IMG_FILE" "$SEED_FILE" "$VM_DIR/$vm_name.conf"
+            [[ -n "$UNATTEND_ISO" ]] && rm -f "$UNATTEND_ISO"
             print_status "SUCCESS" "VM '$vm_name' has been deleted"
         fi
     else
@@ -555,12 +674,13 @@ show_vm_info() {
         echo "Disk: $DISK_SIZE"
         echo "GUI Mode: $GUI_MODE"
         echo "VNC Enabled: $VNC_ENABLED (Port: $VNC_PORT)"
-        echo "Cloudflared: $CLOUDFLARED_ENABLED"
         echo "Port Forwards: ${PORT_FORWARDS:-None}"
         echo "Created: $CREATED"
         echo "Image File: $IMG_FILE"
         echo "Seed File: $SEED_FILE"
         echo "Install ISO: ${INSTALL_ISO:-None}"
+        [[ -n "$UNATTEND_ISO" ]] && echo "Unattend ISO: $UNATTEND_ISO"
+        [[ -n "$VIRTIO_ISO" ]] && echo "VirtIO ISO: $VIRTIO_ISO"
         echo "=========================================="
         echo
         read -p "$(print_status "INPUT" "Press Enter to continue...")"
@@ -612,11 +732,10 @@ edit_vm_config() {
             echo "  4) SSH Port"
             echo "  5) GUI Mode"
             echo "  6) VNC Access"
-            echo "  7) Cloudflared Tunnel"
-            echo "  8) Port Forwards"
-            echo "  9) Memory (RAM)"
-            echo " 10) CPU Count"
-            echo " 11) Disk Size"
+            echo "  7) Port Forwards"
+            echo "  8) Memory (RAM)"
+            echo "  9) CPU Count"
+            echo " 10) Disk Size"
             echo "  0) Back to main menu"
             
             read -p "$(print_status "INPUT" "Enter your choice: ")" edit_choice
@@ -711,26 +830,10 @@ edit_vm_config() {
                     done
                     ;;
                 7)
-                    while true; do
-                        read -p "$(print_status "INPUT" "Enable Cloudflared? (y/n, current: $CLOUDFLARED_ENABLED): ")" cf_input
-                        if [[ "$cf_input" =~ ^[Yy]$ ]]; then 
-                            CLOUDFLARED_ENABLED=true
-                            break
-                        elif [[ "$cf_input" =~ ^[Nn]$ ]]; then
-                            CLOUDFLARED_ENABLED=false
-                            break
-                        elif [ -z "$cf_input" ]; then
-                            break
-                        else
-                            print_status "ERROR" "Please answer y or n"
-                        fi
-                    done
-                    ;;
-                8)
                     read -p "$(print_status "INPUT" "Additional port forwards (current: ${PORT_FORWARDS:-None}): ")" new_port_forwards
                     PORT_FORWARDS="${new_port_forwards:-$PORT_FORWARDS}"
                     ;;
-                9)
+                8)
                     while true; do
                         read -p "$(print_status "INPUT" "Enter new memory in MB (current: $MEMORY): ")" new_memory
                         new_memory="${new_memory:-$MEMORY}"
@@ -740,7 +843,7 @@ edit_vm_config() {
                         fi
                     done
                     ;;
-                10)
+                9)
                     while true; do
                         read -p "$(print_status "INPUT" "Enter new CPU count (current: $CPUS): ")" new_cpus
                         new_cpus="${new_cpus:-$CPUS}"
@@ -750,7 +853,7 @@ edit_vm_config() {
                         fi
                     done
                     ;;
-                11)
+                10)
                     while true; do
                         read -p "$(print_status "INPUT" "Enter new disk size (current: $DISK_SIZE): ")" new_disk_size
                         new_disk_size="${new_disk_size:-$DISK_SIZE}"
@@ -909,7 +1012,7 @@ system_checkup() {
     echo
     
     # Check Dependencies
-    local deps=("qemu-system-x86_64" "wget" "cloud-localds" "qemu-img" "cloudflared")
+    local deps=("qemu-system-x86_64" "wget" "cloud-localds" "qemu-img")
     for dep in "${deps[@]}"; do
         if command -v "$dep" &> /dev/null; then
             print_status "SUCCESS" "Dependency '$dep' found"
@@ -944,6 +1047,7 @@ main_menu() {
         
         echo "Main Menu:"
         echo "  1) Create a new VM"
+        local opt_checkup=2
         if [ $vm_count -gt 0 ]; then
             echo "  2) Start a VM"
             echo "  3) Stop a VM"
@@ -952,8 +1056,9 @@ main_menu() {
             echo "  6) Delete a VM"
             echo "  7) Resize VM disk"
             echo "  8) Show VM performance"
+            opt_checkup=9
         fi
-        echo "  9) System Checkup"
+        echo "  $opt_checkup) System Checkup"
         echo "  0) Exit"
         echo
         
@@ -962,6 +1067,13 @@ main_menu() {
         case $choice in
             1)
                 create_new_vm
+                ;;
+            0)
+                print_status "INFO" "Goodbye!"
+                exit 0
+                ;;
+            $opt_checkup)
+                system_checkup
                 ;;
             2)
                 if [ $vm_count -gt 0 ]; then
@@ -1033,13 +1145,6 @@ main_menu() {
                     fi
                 fi
                 ;;
-            9)
-                system_checkup
-                ;;
-            0)
-                print_status "INFO" "Goodbye!"
-                exit 0
-                ;;
             *)
                 print_status "ERROR" "Invalid option"
                 ;;
@@ -1070,7 +1175,7 @@ declare -A OS_OPTIONS=(
     ["AlmaLinux 9"]="almalinux|9|https://repo.almalinux.org/almalinux/9/cloud/x86_64/images/AlmaLinux-9-GenericCloud-latest.x86_64.qcow2|almalinux9|alma|alma"
     ["Rocky Linux 9"]="rockylinux|9|https://download.rockylinux.org/pub/rocky/9/images/x86_64/Rocky-9-GenericCloud.latest.x86_64.qcow2|rocky9|rocky|rocky"
     ["Windows Server 2022"]="windows|2022|https://software-static.download.prss.microsoft.com/sg/download/888969d5-f34g-4e03-ac9d-1f9786c66749/SERVER_EVAL_x64FRE_en-us.iso|win2022|Administrator|password"
-    ["Windows 11"]="windows|11|https://go.microsoft.com/fwlink/p/?LinkID=2193240|win11|Administrator|password"
+    ["Windows 11"]="windows|11|https://www.microsoft.com/software-download/windows11|win11|Administrator|password"
 )
 
 # Start the main menu
