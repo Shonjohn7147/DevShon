@@ -26,7 +26,7 @@ EOF
 # Function to display colored output
 print_status() {
     local type=$1
-    local message=$2
+    local message=$2 
     
     case $type in
         "INFO") echo -e "\033[1;34m[INFO]\033[0m $message" ;;
@@ -289,6 +289,13 @@ EOF
 # Function to create new VM
 create_new_vm() {
     print_status "INFO" "Creating a new VM"
+    
+    # Initialize all config variables to avoid "unbound variable" errors
+    local VM_NAME="" HOSTNAME="" USERNAME="" PASSWORD="" DISK_SIZE="" MEMORY="" CPUS=""
+    local SSH_PORT="" GUI_MODE=false VNC_ENABLED=false VNC_PORT="5901"
+    local PORT_FORWARDS="" OS_TYPE="" CODENAME="" IMG_URL=""
+    local IMG_FILE="" SEED_FILE="" INSTALL_ISO="" UNATTEND_ISO="" VIRTIO_ISO=""
+    local CREATED=""
     
     # OS Selection
     print_status "INFO" "Select an OS to set up:"
@@ -572,7 +579,7 @@ start_vm() {
         fi
         
         # Base QEMU command
-        local qemu_cmd=(qemu-system-x86_64 -m "$MEMORY" -smp "$CPUS")
+        local qemu_cmd=(qemu-system-x86_64 -m "$MEMORY" -smp "$CPUS" -audiodev none,id=n1)
 
         # Check for KVM availability
         local kvm_enabled=false
@@ -625,7 +632,7 @@ start_vm() {
         # Add GUI, VNC, or console mode
         # Only auto-enable VNC if GUI_MODE is true AND VNC was NOT explicitly disabled (it's false by default)
         # However, the user said "avoid vnc", so we should be careful here.
-        if [[ "$GUI_MODE" == true ]] && [[ -z "$DISPLAY" ]] && [[ "$VNC_ENABLED" == "auto" ]]; then
+        if [[ "$GUI_MODE" == true ]] && [[ -z "${DISPLAY:-}" ]] && [[ "$VNC_ENABLED" == "auto" ]]; then
             print_status "WARN" "No display detected. Enabling VNC as requested by GUI_MODE..."
             VNC_ENABLED=true
         fi
@@ -639,7 +646,7 @@ start_vm() {
                 print_status "INFO" "Since you are in TCG mode, the screen may take 1-2 minutes to appear."
             fi
             print_status "INFO" "Terminal Console: Serial output will be shown below (if supported by OS)."
-        elif [[ "$GUI_MODE" == true ]] && [[ -n "$DISPLAY" ]]; then
+        elif [[ "$GUI_MODE" == true ]] && [[ -n "${DISPLAY:-}" ]]; then
             qemu_cmd+=(-vga virtio -display gtk -serial mon:stdio)
             print_status "INFO" "Opening GUI window... (Serial output also visible in terminal)"
         else
