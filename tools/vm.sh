@@ -10,14 +10,14 @@ display_header() {
     clear
     cat << "EOF"
 ========================================================================
-               _____                 _                 
-              |  __ \               | |                
-              | |  | | _____   _____| |__   ___  _ __  
-              | |  | |/ _ \ \ / / __| '_ \ / _ \| '_ \ 
-              | |__| |  __/\ V /\__ \ | | | (_) | | | |
-              |_____/ \___| \_/ |___/_| |_|\___/|_| |_|
-                                                       
-                           POWERED BY SHON             
+|               _____                 _                                |
+|              |  __ \               | |                               |
+|              | |  | | _____   _____| |__   ___  _ __                 |
+|              | |  | |/ _ \ \ / / __| '_ \ / _ \| '_ \                |
+|              | |__| |  __/\ V /\__ \ | | | (_) | | | |               |
+|              |_____/ \___| \_/ |___/_| |_|\___/|_| |_|               |
+|                                                                      |
+|                           POWERED BY SHON                            |
 ========================================================================
 EOF
     echo
@@ -564,11 +564,14 @@ start_vm() {
         local qemu_cmd=(qemu-system-x86_64 -m "$MEMORY" -smp "$CPUS")
 
         # Check for KVM availability
+        local kvm_enabled=false
         if [ -w /dev/kvm ] && grep -qE "vmx|svm" /proc/cpuinfo; then
             print_status "INFO" "KVM acceleration enabled."
             qemu_cmd+=(-enable-kvm -cpu host)
+            kvm_enabled=true
         else
-            print_status "WARN" "KVM not accessible. Falling back to software emulation (TCG). This will be slower."
+            print_status "WARN" "KVM not accessible. Falling back to software emulation (TCG)."
+            print_status "WARN" "Note: TCG mode is VERY SLOW. Booting may take several minutes."
             qemu_cmd+=(-cpu max)
         fi
 
@@ -616,12 +619,19 @@ start_vm() {
 
         if [[ "$VNC_ENABLED" == true ]]; then
             local vnc_display=$((VNC_PORT - 5900))
-            qemu_cmd+=(-vnc ":$vnc_display" -display none)
+            qemu_cmd+=(-vnc ":$vnc_display" -display none -serial mon:stdio)
             print_status "SUCCESS" "VNC enabled on port $VNC_PORT (: $vnc_display)"
+            print_status "INFO" "Connection: Use a VNC viewer (like RealVNC or TightVNC) to connect to 'localhost:$VNC_PORT'"
+            if [[ "$kvm_enabled" == false ]]; then
+                print_status "INFO" "Since you are in TCG mode, the screen may take 1-2 minutes to appear."
+            fi
+            print_status "INFO" "Terminal Console: Serial output will be shown below (if supported by OS)."
         elif [[ "$GUI_MODE" == true ]]; then
-            qemu_cmd+=(-vga virtio -display gtk)
+            qemu_cmd+=(-vga virtio -display gtk -serial mon:stdio)
+            print_status "INFO" "Opening GUI window... (Serial output also visible in terminal)"
         else
             qemu_cmd+=(-nographic -serial mon:stdio)
+            print_status "INFO" "Starting in terminal mode (nographic)."
         fi
 
         # Add performance enhancements
@@ -1025,6 +1035,57 @@ system_checkup() {
     read -p "$(print_status "INPUT" "Press Enter to continue...")"
 }
 
+# Function for system dashboard
+system_dashboard() {
+    clear
+    while true; do
+        display_header
+        echo "========================================================================"
+        echo "                         SYSTEM DASHBOARD                               "
+        echo "========================================================================"
+        
+        # CPU Usage
+        local cpu_usage=$(top -bn1 | grep "Cpu(s)" | sed "s/.*, *\([0-9.]*\)%* id.*/\1/" | awk '{print 100 - $1"%"}')
+        echo -e "CPU Usage:    \033[1;32m$cpu_usage\033[0m"
+        
+        # Memory Usage
+        local mem_info=$(free -m | grep Mem)
+        local total_mem=$(echo $mem_info | awk '{print $2}')
+        local used_mem=$(echo $mem_info | awk '{print $3}')
+        local mem_pct=$((used_mem * 100 / total_mem))
+        echo -e "Memory Usage: \033[1;34m$used_mem / $total_mem MB ($mem_pct%)\033[0m"
+        
+        # Disk Usage (VM Directory)
+        local disk_info=$(df -h "$VM_DIR" | tail -1)
+        local disk_used=$(echo $disk_info | awk '{print $3}')
+        local disk_total=$(echo $disk_info | awk '{print $2}')
+        local disk_pct=$(echo $disk_info | awk '{print $5}')
+        echo -e "Disk Usage:   \033[1;33m$disk_used / $disk_total ($disk_pct) in $VM_DIR\033[0m"
+        
+        echo "------------------------------------------------------------------------"
+        echo "Running VMs:"
+        local running_found=false
+        local vms=($(get_vm_list))
+        for vm in "${vms[@]}"; do
+            local pid=$(pgrep -f "qemu-system-x86_64.*$vm" || echo "")
+            if [[ -n "$pid" ]]; then
+                local vm_stats=$(ps -p "$pid" -o %cpu,%mem --no-headers)
+                printf "  %-20s | PID: %-6s | CPU: %-5s | MEM: %-5s\n" "$vm" "$pid" $(echo $vm_stats | awk '{print $1"%"}') $(echo $vm_stats | awk '{print $2"%"}')
+                running_found=true
+            fi
+        done
+        [[ "$running_found" == false ]] && echo "  No VMs currently running."
+        
+        echo "========================================================================"
+        echo "  [R] Refresh  [B] Back to Main Menu"
+        read -n 1 -s -t 5 input
+        case ${input^^} in
+            B) return ;;
+            R) continue ;;
+        esac
+    done
+}
+
 # Main menu function
 main_menu() {
     while true; do
@@ -1047,7 +1108,8 @@ main_menu() {
         
         echo "Main Menu:"
         echo "  1) Create a new VM"
-        local opt_checkup=2
+        local opt_dashboard=2
+        local opt_checkup=3
         if [ $vm_count -gt 0 ]; then
             echo "  2) Start a VM"
             echo "  3) Stop a VM"
@@ -1056,8 +1118,10 @@ main_menu() {
             echo "  6) Delete a VM"
             echo "  7) Resize VM disk"
             echo "  8) Show VM performance"
-            opt_checkup=9
+            opt_dashboard=9
+            opt_checkup=10
         fi
+        echo "  $opt_dashboard) System Dashboard"
         echo "  $opt_checkup) System Checkup"
         echo "  0) Exit"
         echo
@@ -1071,6 +1135,9 @@ main_menu() {
             0)
                 print_status "INFO" "Goodbye!"
                 exit 0
+                ;;
+            $opt_dashboard)
+                system_dashboard
                 ;;
             $opt_checkup)
                 system_checkup
