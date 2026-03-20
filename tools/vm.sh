@@ -205,6 +205,7 @@ load_vm_config() {
         OS_TYPE="${OS_TYPE:-ubuntu}"
         UNATTEND_ISO="${UNATTEND_ISO:-}"
         VIRTIO_ISO="${VIRTIO_ISO:-}"
+        RDP_PORT="${RDP_PORT:-3389}"
         IMG_FILE="${IMG_FILE:-$VM_DIR/$vm_name.qcow2}"
         SEED_FILE="${SEED_FILE:-$VM_DIR/$vm_name-seed.img}"
         INSTALL_ISO="${INSTALL_ISO:-}"
@@ -317,6 +318,20 @@ generate_windows_unattend() {
                 <ProtectYourPC>3</ProtectYourPC>
             </OOBE>
             <TimeZone>UTC</TimeZone>
+            <FirstLogonCommands>
+                <SynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <CommandLine>reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 0 /f</CommandLine>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <CommandLine>netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes</CommandLine>
+                </SynchronousCommand>
+                <SynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <CommandLine>reg add "HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" /v UserAuthentication /t REG_DWORD /d 0 /f</CommandLine>
+                </SynchronousCommand>
+            </FirstLogonCommands>
         </component>
     </settings>
 </unattend>
@@ -348,6 +363,7 @@ SEED_FILE="$SEED_FILE"
 INSTALL_ISO="$INSTALL_ISO"
 UNATTEND_ISO="$UNATTEND_ISO"
 VIRTIO_ISO="$VIRTIO_ISO"
+RDP_PORT="$RDP_PORT"
 CREATED="$CREATED"
 EOF
     
@@ -360,7 +376,7 @@ create_new_vm() {
     
     # Initialize all config variables to avoid "unbound variable" errors
     local VM_NAME="" HOSTNAME="" USERNAME="" PASSWORD="" DISK_SIZE="" MEMORY="" CPUS=""
-    local SSH_PORT="" GUI_MODE=false VNC_ENABLED=false VNC_PORT="5901"
+    local SSH_PORT="" RDP_PORT="" GUI_MODE=false VNC_ENABLED=false VNC_PORT="5901"
     local PORT_FORWARDS="" OS_TYPE="" CODENAME="" IMG_URL=""
     local IMG_FILE="" SEED_FILE="" INSTALL_ISO="" UNATTEND_ISO="" VIRTIO_ISO=""
     local CREATED=""
@@ -463,6 +479,19 @@ create_new_vm() {
             fi
         fi
     done
+    if [[ "$OS_TYPE" == "windows" ]]; then
+        while true; do
+            read -p "$(print_status "INPUT" "Enter RDP Port (default: 3389): ")" RDP_PORT
+            RDP_PORT="${RDP_PORT:-3389}"
+            if validate_input "port" "$RDP_PORT"; then
+                if ss -tln 2>/dev/null | grep -q ":$RDP_PORT "; then
+                    print_status "ERROR" "Port $RDP_PORT is already in use"
+                else
+                    break
+                fi
+            fi
+        done
+    fi
 
     if [[ "$OS_TYPE" == "windows" ]]; then
         print_status "INFO" "Windows requires GUI mode for installation. Forcing GUI mode enabled."
@@ -617,6 +646,9 @@ start_vm() {
     if load_vm_config "$vm_name"; then
         print_status "INFO" "Starting VM: $vm_name"
         print_status "INFO" "SSH: ssh -p $SSH_PORT $USERNAME@localhost"
+        if [[ "$OS_TYPE" == "windows" ]]; then
+            print_status "INFO" "RDP: Connect using 'localhost:$RDP_PORT' (Username: $USERNAME)"
+        fi
         print_status "INFO" "Password: $PASSWORD"
         
         # Check if image file exists
@@ -647,12 +679,20 @@ start_vm() {
         fi
 
         if [[ "$OS_TYPE" == "windows" ]]; then
+            if [[ "$VNC_ENABLED" == true ]]; then
+                print_status "WARN" "Windows RDP is enabled on port $RDP_PORT."
+                read -p "$(print_status "INPUT" "Do you want to disable VNC and use RDP instead? (y/N): ")" -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    VNC_ENABLED=false
+                fi
+            fi
             qemu_cmd+=(
                 -drive "file=$IMG_FILE,format=qcow2,if=ide"
                 -drive "file=$INSTALL_ISO,media=cdrom,readonly=on"
                 -boot d
                 -device e1000,netdev=n0
-                -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
+                -netdev "user,id=n0,hostfwd=tcp::$RDP_PORT-:3389,hostfwd=tcp::$SSH_PORT-:22"
             )
             
             # Add unattended and driver ISOs if they exist
@@ -755,6 +795,7 @@ show_vm_info() {
         echo "Username: $USERNAME"
         echo "Password: $PASSWORD"
         echo "SSH Port: $SSH_PORT"
+        [[ "$OS_TYPE" == "windows" ]] && echo "RDP Port: $RDP_PORT"
         echo "Memory: $MEMORY MB"
         echo "CPUs: $CPUS"
         echo "Disk: $DISK_SIZE"
@@ -822,6 +863,9 @@ edit_vm_config() {
             echo "  8) Memory (RAM)"
             echo "  9) CPU Count"
             echo " 10) Disk Size"
+            if [[ "$OS_TYPE" == "windows" ]]; then
+                echo " 11) RDP Port"
+            fi
             echo "  0) Back to main menu"
             
             read -p "$(print_status "INPUT" "Enter your choice: ")" edit_choice
@@ -948,6 +992,24 @@ edit_vm_config() {
                             break
                         fi
                     done
+                    ;;
+                11)
+                    if [[ "$OS_TYPE" == "windows" ]]; then
+                        while true; do
+                            read -p "$(print_status "INPUT" "Enter new RDP port (current: $RDP_PORT): ")" new_rdp_port
+                            new_rdp_port="${new_rdp_port:-$RDP_PORT}"
+                            if validate_input "port" "$new_rdp_port"; then
+                                if [ "$new_rdp_port" != "$RDP_PORT" ] && ss -tln 2>/dev/null | grep -q ":$new_rdp_port "; then
+                                    print_status "ERROR" "Port $new_rdp_port is already in use"
+                                else
+                                    RDP_PORT="$new_rdp_port"
+                                    break
+                                fi
+                            fi
+                        done
+                    else
+                        print_status "ERROR" "RDP is only supported for Windows VMs."
+                    fi
                     ;;
                 0)
                     return 0
