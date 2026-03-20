@@ -38,6 +38,59 @@ print_status() {
     esac
 }
 
+# Function to download a file with retries and fallback
+download_with_retry() {
+    local target_file=$1
+    local primary_url=$2
+    local fallback_url=$3
+    local max_retries=3
+    
+    # Check if target already exists in current VM directory
+    if [[ -f "$target_file" ]]; then
+        print_status "SUCCESS" "File $(basename "$target_file") already exists in VM directory. Using cached version."
+        return 0
+    fi
+
+    # Check for a "global" cache (fallback to /root/vms if it matches user's request)
+    local global_cache="/root/vms/$(basename "$target_file")"
+    if [[ -f "$global_cache" ]] && [[ "$target_file" != "$global_cache" ]]; then
+        print_status "INFO" "Found $(basename "$target_file") in global cache ($global_cache). Copying..."
+        cp "$global_cache" "$target_file"
+        return 0
+    fi
+
+    # Try Primary URL
+    for ((i=1; i<=max_retries; i++)); do
+        print_status "INFO" "Downloading $(basename "$target_file") from primary URL (Attempt $i/$max_retries)..."
+        # Force IPv4 (-4) to avoid IPv6 issues in containers
+        if wget -U "Mozilla/5.0" -4 --progress=bar:force "$primary_url" -O "$target_file.tmp"; then
+            mv "$target_file.tmp" "$target_file"
+            print_status "SUCCESS" "Download successful."
+            return 0
+        fi
+        print_status "WARN" "Attempt $i failed."
+        sleep 2
+    done
+
+    # Try Fallback URL if provided
+    if [[ -n "$fallback_url" ]]; then
+        print_status "INFO" "Primary URL failed. Trying fallback URL..."
+        for ((i=1; i<=max_retries; i++)); do
+            print_status "INFO" "Downloading $(basename "$target_file") from fallback URL (Attempt $i/$max_retries)..."
+            if wget -U "Mozilla/5.0" -4 --progress=bar:force "$fallback_url" -O "$target_file.tmp"; then
+                mv "$target_file.tmp" "$target_file"
+                print_status "SUCCESS" "Fallback download successful."
+                return 0
+            fi
+            print_status "WARN" "Fallback attempt $i failed."
+            sleep 2
+        done
+    fi
+
+    print_status "ERROR" "Failed to download $(basename "$target_file") after all attempts."
+    return 1
+}
+
 # Function to validate input
 validate_input() {
     local type=$1
@@ -105,6 +158,7 @@ cleanup() {
 
 # VirtIO Drivers for Windows
 VIRTIO_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-virtio/virtio-win.iso"
+VIRTIO_URL_FALLBACK="https://github.com/virtio-win/virtio-win-pkg-scripts/releases/latest/download/virtio-win.iso"
 
 # Function to get all VM configurations
 get_vm_list() {
@@ -464,22 +518,14 @@ setup_vm_image() {
     if [[ "$OS_TYPE" == "windows" ]]; then
         # Download Windows ISO
         if [[ ! -f "$INSTALL_ISO" ]]; then
-            print_status "INFO" "Downloading Windows ISO from $IMG_URL..."
-            if ! wget -U "Mozilla/5.0" --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
-                print_status "ERROR" "Failed to download image from $IMG_URL"
-                exit 1
-            fi
-            mv "$INSTALL_ISO.tmp" "$INSTALL_ISO"
+            print_status "INFO" "Downloading Windows ISO..."
+            download_with_retry "$INSTALL_ISO" "$IMG_URL" "" || exit 1
         fi
         
         # Download VirtIO ISO
         if [[ ! -f "$VIRTIO_ISO" ]]; then
             print_status "INFO" "Downloading VirtIO Driver ISO..."
-            if ! wget --progress=bar:force "$VIRTIO_URL" -O "$VIRTIO_ISO.tmp"; then
-                print_status "ERROR" "Failed to download VirtIO drivers"
-                exit 1
-            fi
-            mv "$VIRTIO_ISO.tmp" "$VIRTIO_ISO"
+            download_with_retry "$VIRTIO_ISO" "$VIRTIO_URL" "$VIRTIO_URL_FALLBACK" || exit 1
         fi
 
         # Generate Unattend ISO
@@ -506,12 +552,8 @@ setup_vm_image() {
     if [[ -f "$IMG_FILE" ]]; then
         print_status "INFO" "Image file already exists. Skipping download."
     else
-        print_status "INFO" "Downloading image from $IMG_URL..."
-        if ! wget -U "Mozilla/5.0" --progress=bar:force "$IMG_URL" -O "$IMG_FILE.tmp"; then
-            print_status "ERROR" "Failed to download image from $IMG_URL"
-            exit 1
-        fi
-        mv "$IMG_FILE.tmp" "$IMG_FILE"
+        print_status "INFO" "Downloading image..."
+        download_with_retry "$IMG_FILE" "$IMG_URL" "" || exit 1
     fi
     
     # Resize the disk image if needed
