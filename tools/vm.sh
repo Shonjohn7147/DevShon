@@ -465,7 +465,7 @@ setup_vm_image() {
         # Download Windows ISO
         if [[ ! -f "$INSTALL_ISO" ]]; then
             print_status "INFO" "Downloading Windows ISO from $IMG_URL..."
-            if ! wget -U "Mozilla/5.0" --prefer-family=IPv6 --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
+            if ! wget -U "Mozilla/5.0" --progress=bar:force "$IMG_URL" -O "$INSTALL_ISO.tmp"; then
                 print_status "ERROR" "Failed to download image from $IMG_URL"
                 exit 1
             fi
@@ -507,7 +507,7 @@ setup_vm_image() {
         print_status "INFO" "Image file already exists. Skipping download."
     else
         print_status "INFO" "Downloading image from $IMG_URL..."
-        if ! wget -U "Mozilla/5.0" --prefer-family=IPv6 --progress=bar:force "$IMG_URL" -O "$IMG_FILE.tmp"; then
+        if ! wget -U "Mozilla/5.0" --progress=bar:force "$IMG_URL" -O "$IMG_FILE.tmp"; then
             print_status "ERROR" "Failed to download image from $IMG_URL"
             exit 1
         fi
@@ -598,8 +598,8 @@ start_vm() {
                 -drive "file=$IMG_FILE,format=qcow2,if=ide"
                 -drive "file=$INSTALL_ISO,media=cdrom,readonly=on"
                 -boot d
-                -device virtio-net-pci,netdev=n0
-                -netdev "user,id=n0,ipv6=on,ipv6-net=fd00::/64,hostfwd=tcp::$SSH_PORT-:22"
+                -device e1000,netdev=n0
+                -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
             )
             
             # Add unattended and driver ISOs if they exist
@@ -614,8 +614,8 @@ start_vm() {
                 -drive "file=$IMG_FILE,format=qcow2,if=virtio"
                 -drive "file=$SEED_FILE,format=raw,if=virtio"
                 -boot order=c
-                -device virtio-net-pci,netdev=n0
-                -netdev "user,id=n0,ipv6=on,ipv6-net=fd00::/64,hostfwd=tcp::$SSH_PORT-:22"
+                -device e1000,netdev=n0
+                -netdev "user,id=n0,hostfwd=tcp::$SSH_PORT-:22"
             )
         fi
 
@@ -624,7 +624,7 @@ start_vm() {
             IFS=',' read -ra forwards <<< "$PORT_FORWARDS"
             for forward in "${forwards[@]}"; do
                 IFS=':' read -r host_port guest_port <<< "$forward"
-                qemu_cmd+=(-device "virtio-net-pci,netdev=n${#qemu_cmd[@]}")
+                qemu_cmd+=(-device "e1000,netdev=n${#qemu_cmd[@]}")
                 qemu_cmd+=(-netdev "user,id=n${#qemu_cmd[@]},hostfwd=tcp::$host_port-:$guest_port")
             done
         fi
@@ -1103,6 +1103,34 @@ system_checkup() {
     fi
 }
 
+# Function to install Tailscale
+install_tailscale() {
+    if command -v tailscale >/dev/null 2>&1; then
+        print_status "INFO" "Tailscale is already installed."
+        read -p "$(print_status "INPUT" "Do you want to run the installer anyway? (y/n): ")" reinstall
+        if [[ ! "$reinstall" =~ ^[Yy]$ ]]; then
+            return 0
+        fi
+    fi
+
+    print_status "INFO" "Installing Tailscale..."
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL https://tailscale.com/install.sh | sh
+    elif command -v wget >/dev/null 2>&1; then
+        sh -c "$(wget -qO- https://tailscale.com/install.sh)"
+    else
+        print_status "ERROR" "Neither curl nor wget found. Please install one to proceed."
+        return 1
+    fi
+    
+    if command -v tailscale >/dev/null 2>&1; then
+        print_status "SUCCESS" "Tailscale installed successfully!"
+        print_status "INFO" "You can now run 'tailscale up' to connect to your Tailnet."
+    else
+        print_status "ERROR" "Tailscale installation failed or requires manual intervention."
+    fi
+}
+
 # Function for system dashboard
 system_dashboard() {
     clear
@@ -1178,6 +1206,7 @@ main_menu() {
         echo "  1) Create a new VM"
         local opt_dashboard=2
         local opt_checkup=3
+        local opt_tailscale=4
         if [ $vm_count -gt 0 ]; then
             echo "  2) Start a VM"
             echo "  3) Stop a VM"
@@ -1188,9 +1217,11 @@ main_menu() {
             echo "  8) Show VM performance"
             opt_dashboard=9
             opt_checkup=10
+            opt_tailscale=11
         fi
         echo "  $opt_dashboard) System Dashboard"
         echo "  $opt_checkup) System Checkup"
+        echo "  $opt_tailscale) Install Tailscale"
         echo "  0) Exit"
         echo
         
@@ -1209,6 +1240,9 @@ main_menu() {
                 ;;
             $opt_checkup)
                 system_checkup
+                ;;
+            $opt_tailscale)
+                install_tailscale
                 ;;
             2)
                 if [ $vm_count -gt 0 ]; then
