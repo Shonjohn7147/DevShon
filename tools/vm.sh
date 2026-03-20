@@ -38,56 +38,67 @@ print_status() {
     esac
 }
 
-# Function to download a file with retries and fallback
+# Function to download a file with retries and multiple fallback mirrors
 download_with_retry() {
     local target_file=$1
-    local primary_url=$2
-    local fallback_url=$3
-    local max_retries=3
+    shift
+    local mirrors=("$@")
+    local max_retries=2
     
     # Check if target already exists in current VM directory
     if [[ -f "$target_file" ]]; then
-        print_status "SUCCESS" "File $(basename "$target_file") already exists in VM directory. Using cached version."
+        print_status "SUCCESS" "File $(basename "$target_file") already exists. Using cached version."
         return 0
     fi
 
-    # Check for a "global" cache (fallback to /root/vms if it matches user's request)
-    local global_cache="/root/vms/$(basename "$target_file")"
-    if [[ -f "$global_cache" ]] && [[ "$target_file" != "$global_cache" ]]; then
-        print_status "INFO" "Found $(basename "$target_file") in global cache ($global_cache). Copying..."
-        cp "$global_cache" "$target_file"
-        return 0
-    fi
-
-    # Try Primary URL
-    for ((i=1; i<=max_retries; i++)); do
-        print_status "INFO" "Downloading $(basename "$target_file") from primary URL (Attempt $i/$max_retries)..."
-        # Force IPv4 (-4) to avoid IPv6 issues in containers
-        if wget -U "Mozilla/5.0" -4 --progress=bar:force "$primary_url" -O "$target_file.tmp"; then
-            mv "$target_file.tmp" "$target_file"
-            print_status "SUCCESS" "Download successful."
+    # Check for a "global" cache in common locations
+    local global_caches=("/root/vms/$(basename "$target_file")" "$HOME/vms/$(basename "$target_file")")
+    for cache in "${global_caches[@]}"; do
+        if [[ -f "$cache" ]]; then
+            # Avoid copying to itself
+            if [[ -f "$target_file" ]] && [[ "$target_file" -ef "$cache" ]]; then continue; fi
+            
+            print_status "INFO" "Found $(basename "$target_file") in cache ($cache). Copying..."
+            cp "$cache" "$target_file"
             return 0
         fi
-        print_status "WARN" "Attempt $i failed."
-        sleep 2
     done
 
-    # Try Fallback URL if provided
-    if [[ -n "$fallback_url" ]]; then
-        print_status "INFO" "Primary URL failed. Trying fallback URL..."
+    # Try each mirror
+    for url in "${mirrors[@]}"; do
+        [[ -z "$url" ]] && continue
+        
+        print_status "INFO" "Validating mirror: $(echo "$url" | cut -d/ -f3)..."
+        if ! wget -q -4 --spider --tries=1 --timeout=5 "$url"; then
+            print_status "WARN" "Mirror reachable but returned 404 or timed out. Skipping..."
+            continue
+        fi
+
         for ((i=1; i<=max_retries; i++)); do
-            print_status "INFO" "Downloading $(basename "$target_file") from fallback URL (Attempt $i/$max_retries)..."
-            if wget -U "Mozilla/5.0" -4 --progress=bar:force "$fallback_url" -O "$target_file.tmp"; then
+            print_status "INFO" "Downloading $(basename "$target_file") (Attempt $i/$max_retries)..."
+            if wget -U "Mozilla/5.0" -4 --progress=bar:force "$url" -O "$target_file.tmp"; then
                 mv "$target_file.tmp" "$target_file"
-                print_status "SUCCESS" "Fallback download successful."
+                print_status "SUCCESS" "Download successful."
                 return 0
             fi
-            print_status "WARN" "Fallback attempt $i failed."
-            sleep 2
+            print_status "WARN" "Attempt $i failed."
+            sleep 1
         done
+    done
+
+    # All mirrors failed - Manual Fallback
+    print_status "ERROR" "All download mirrors failed for $(basename "$target_file")."
+    echo "------------------------------------------------------------------------"
+    print_status "INPUT" "Please provide a local path to the $(basename "$target_file") file,"
+    read -p "$(print_status "INPUT" "or press Enter to cancel installation: ")" local_path
+    echo "------------------------------------------------------------------------"
+    
+    if [[ -n "$local_path" ]] && [[ -f "$local_path" ]]; then
+        print_status "INFO" "Using provided local file: $local_path"
+        cp "$local_path" "$target_file"
+        return 0
     fi
 
-    print_status "ERROR" "Failed to download $(basename "$target_file") after all attempts."
     return 1
 }
 
@@ -156,9 +167,12 @@ cleanup() {
     if [ -f "autounattend.xml" ]; then rm -f "autounattend.xml"; fi
 }
 
-# VirtIO Drivers for Windows
-VIRTIO_URL="https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/latest-virtio/virtio-win.iso"
-VIRTIO_URL_FALLBACK="https://github.com/virtio-win/virtio-win-pkg-scripts/releases/latest/download/virtio-win.iso"
+# VirtIO Drivers for Windows (Multiple Mirrors for stability)
+VIRTIO_MIRRORS=(
+    "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso"
+    "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.262-1/virtio-win.iso"
+    "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/virtio-win-0.1.248-1/virtio-win.iso"
+)
 
 # Function to get all VM configurations
 get_vm_list() {
@@ -518,14 +532,12 @@ setup_vm_image() {
     if [[ "$OS_TYPE" == "windows" ]]; then
         # Download Windows ISO
         if [[ ! -f "$INSTALL_ISO" ]]; then
-            print_status "INFO" "Downloading Windows ISO..."
-            download_with_retry "$INSTALL_ISO" "$IMG_URL" "" || exit 1
+            download_with_retry "$INSTALL_ISO" "$IMG_URL" || exit 1
         fi
         
         # Download VirtIO ISO
         if [[ ! -f "$VIRTIO_ISO" ]]; then
-            print_status "INFO" "Downloading VirtIO Driver ISO..."
-            download_with_retry "$VIRTIO_ISO" "$VIRTIO_URL" "$VIRTIO_URL_FALLBACK" || exit 1
+            download_with_retry "$VIRTIO_ISO" "${VIRTIO_MIRRORS[@]}" || exit 1
         fi
 
         # Generate Unattend ISO
@@ -552,8 +564,7 @@ setup_vm_image() {
     if [[ -f "$IMG_FILE" ]]; then
         print_status "INFO" "Image file already exists. Skipping download."
     else
-        print_status "INFO" "Downloading image..."
-        download_with_retry "$IMG_FILE" "$IMG_URL" "" || exit 1
+        download_with_retry "$IMG_FILE" "$IMG_URL" || exit 1
     fi
     
     # Resize the disk image if needed
@@ -1377,7 +1388,7 @@ mkdir -p "$VM_DIR"
 
 # Supported OS list
 declare -A OS_OPTIONS=(
-        ["Ubuntu 22.04"]="ubuntu|jammy|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu22|ubuntu|ubuntu"
+    ["Ubuntu 22.04"]="ubuntu|jammy|https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img|ubuntu22|ubuntu|ubuntu"
     ["Ubuntu 24.04"]="ubuntu|noble|https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img|ubuntu24|ubuntu|ubuntu"
     ["Debian 11"]="debian|bullseye|https://cloud.debian.org/images/cloud/bullseye/latest/debian-11-generic-amd64.qcow2|debian11|debian|debian"
     ["Debian 12"]="debian|bookworm|https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2|debian12|debian|debian"
